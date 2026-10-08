@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Electricity Usage Analyzer | Dashboard</title>
+
+    <!-- Theme Initialization Script (Prevents FOUC) -->
+    <meta name="color-scheme" content="light dark">
+    <script>
+        (function () {
+            const savedTheme = localStorage.getItem("app-theme") ||
+                (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+            document.documentElement.setAttribute("data-theme", savedTheme);
+        })();
+    </script>
+
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <div class="container">
+
+        <!-- ================= Header ================= -->
+        <header class="app-header">
+            <div class="header-brand">
+                <div class="brand-icon-wrapper">⚡</div>
+                <div>
+                    <h1>Smart Electricity Usage Analyzer</h1>
+                    <p>AI-Powered Energy Monitoring, Pattern Analytics & Predictive Forecasting</p>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <div class="system-pill">
+                    <span class="pulse-dot"></span>
+                    <span>System Active • {{ record_count }} Records</span>
+                </div>
+
+                <a href="/export" class="btn-secondary" title="Export CSV Data">
+                    <span>📥 Export CSV</span>
+                </a>
+
+                <button id="themeToggleBtn" class="btn-icon" aria-label="Toggle Theme" title="Toggle Light / Dark Mode">
+                    <span id="themeIcon">🌙</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- ================= KPI Summary Cards ================= -->
+        <section class="cards-grid">
+            <!-- Total Consumption -->
+            <div class="kpi-card card-blue">
+                <div class="kpi-header">
+                    <h3>Total Usage</h3>
+                    <span class="kpi-icon">⚡</span>
+                </div>
+                <div class="kpi-value">
+                    {{ total_units }}<span class="kpi-unit">kWh</span>
+                </div>
+                <div class="kpi-footer">Accumulated across recorded cycle</div>
+            </div>
+
+            <!-- Average Daily Usage -->
+            <div class="kpi-card card-teal">
+                <div class="kpi-header">
+                    <h3>Daily Average</h3>
+                    <span class="kpi-icon">📈</span>
+                </div>
+                <div class="kpi-value">
+                    {{ average_units }}<span class="kpi-unit">kWh/day</span>
+                </div>
+                <div class="kpi-footer">Normal baseline consumption</div>
+            </div>
+
+            <!-- Peak Usage -->
+            <div class="kpi-card card-amber">
+                <div class="kpi-header">
+                    <h3>Peak Usage</h3>
+                    <span class="kpi-icon">🔥</span>
+                </div>
+                <div class="kpi-value">
+                    {{ highest_usage }}<span class="kpi-unit">kWh</span>
+                </div>
+                <div class="kpi-footer">Max recorded on {{ peak_date }}</div>
+            </div>
+
+            <!-- Estimated Utility Cost -->
+            <div class="kpi-card card-purple">
+                <div class="kpi-header">
+                    <h3>Estimated Bill</h3>
+                    <span class="kpi-icon">💳</span>
+                </div>
+                <div class="kpi-value">
+                    ₹{{ estimated_cost }}
+                </div>
+                <div class="kpi-footer">Calculated via tiered slab tariff</div>
+            </div>
+        </section>
+
+        <!-- ================= Status & Recommendations ================= -->
+        <section class="alerts-section">
+            <!-- Energy Status -->
+            <div class="status-card">
+                <div class="alert-icon-box">📊</div>
+                <div class="alert-body">
+                    <h2>
+                        Energy Status
+                        <span class="status-badge status-{{ status }}">{{ status }}</span>
+                    </h2>
+                    <p>
+                        Current household consumption level is categorized as <strong>{{ status }}</strong>.
+                        Peak surge reached <strong>{{ peak_units }} kWh</strong> on <strong>{{ peak_date }}</strong>.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Smart Recommendation -->
+            <div class="recommendation-card">
+                <div class="alert-icon-box">💡</div>
+                <div class="alert-body">
+                    <h2>Smart Advisory</h2>
+                    <p>{{ recommendation }}</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= Analytics & Charts ================= -->
+        <section class="charts-grid">
+            <!-- Historical Usage Chart -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>📉 Historical Consumption Trend</h2>
+                    <span class="panel-subtitle">Recorded Daily kWh</span>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="usageChart"></canvas>
+                </div>
+            </div>
+
+            <!-- AI Predictive Model Chart -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>🤖 AI 7-Day Usage Forecast</h2>
+                    <span class="panel-subtitle">Linear Regression Model</span>
+                </div>
+                <div class="prediction-stats">
+                    <div class="prediction-stat-item">
+                        Avg Forecast: <strong>{{ predicted_average }} kWh/day</strong>
+                    </div>
+                    <div class="prediction-stat-item">
+                        Est. Monthly Cost: <strong>₹{{ predicted_cost }}</strong>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="predictionChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= Data Management: Table & Add Entry ================= -->
+        <section class="data-management-grid">
+            <!-- Data Table -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>📋 Electricity Consumption Log</h2>
+                    <span class="panel-subtitle">{{ record_count }} Recorded Days</span>
+                </div>
+                <div class="table-responsive">
+                    <table class="custom-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Units (kWh)</th>
+                                <th>Temp (°C)</th>
+                                <th>Appliances</th>
+                                <th>Est. Cost</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for record in records %}
+                            <tr>
+                                <td><strong>{{ record.display_date }}</strong></td>
+                                <td>
+                                    <span>{{ record.units }} kWh</span>
+                                    {% if record.units == highest_usage %}
+                                    <span class="table-tag" style="background: var(--danger-light); color: var(--danger);">Peak</span>
+                                    {% elif record.units == lowest_usage %}
+                                    <span class="table-tag" style="background: var(--success-light); color: var(--success);">Min</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ record.temperature }}°C</td>
+                                <td>{{ record.appliances }} Units</td>
+                                <td>₹{{ record.cost }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Add Data Form -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h2>➕ Log New Reading</h2>
+                    <span class="panel-subtitle">Append Daily Record</span>
+                </div>
+                <form action="/add" method="POST" class="form-grid">
+                    <div class="form-group">
+                        <label for="inputDate">Reading Date</label>
+                        <input type="date" id="inputDate" name="date" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="inputUnits">Electricity Units (kWh)</label>
+                        <input type="number" id="inputUnits" name="units" step="0.1" min="0" placeholder="e.g. 14.5" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="inputTemp">Average Temperature (°C)</label>
+                        <input type="number" id="inputTemp" name="temperature" step="0.1" placeholder="e.g. 29.5" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="inputAppliances">Active Appliances</label>
+                        <input type="number" id="inputAppliances" name="appliances" min="1" placeholder="e.g. 6" required>
+                    </div>
+
+                    <button type="submit" class="btn-primary">
+                        <span>Save & Update Analytics</span>
+                        <span>➔</span>
+                    </button>
+                </form>
+            </div>
+        </section>
+
+        <!-- ================= Footer ================= -->
+        <footer class="app-footer">
+            <p>Smart Electricity Usage Analyzer • Built with Modern Web Standards</p>
+            <div class="tech-badges">
+                <span class="tech-badge">Python Flask</span>
+                <span class="tech-badge">Pandas Analytics</span>
+                <span class="tech-badge">Scikit-Learn ML</span>
+                <span class="tech-badge">Chart.js 4</span>
+                <span class="tech-badge">CSS Grid & Variables</span>
+            </div>
+        </footer>
+
+    </div>
+
+    <!-- ================= Interactive Scripts & Charts ================= -->
+    <script>
+        // Data from Flask
+        const dates = {{ chart_dates | tojson }};
+        const units = {{ chart_units | tojson }};
+        const futureDates = {{ future_dates | tojson }};
+        const predictions = {{ predictions | tojson }};
+
+        // Theme management
+        const htmlElement = document.documentElement;
+        const themeToggleBtn = document.getElementById("themeToggleBtn");
+        const themeIcon = document.getElementById("themeIcon");
+
+        function updateThemeIcon(theme) {
+            themeIcon.textContent = theme === "dark" ? "☀️" : "🌙";
+        }
+
+        // Initialize icon state
+        updateThemeIcon(htmlElement.getAttribute("data-theme"));
+
+        // Helper to get dynamic chart colors based on current theme
+        function getChartColors() {
+            const isDark = htmlElement.getAttribute("data-theme") === "dark";
+            return {
+                text: isDark ? "#94a3b8" : "#64748b",
+                grid: isDark ? "rgba(36, 50, 74, 0.7)" : "rgba(226, 232, 240, 0.8)",
+                tooltipBg: isDark ? "#1e293b" : "#0f172a",
+                tooltipText: "#ffffff"
+            };
+        }
+
+        // Setup Consumption Line Chart
+        const usageCtx = document.getElementById("usageChart").getContext("2d");
+        const usageGradient = usageCtx.createLinearGradient(0, 0, 0, 300);
+        usageGradient.addColorStop(0, "rgba(37, 99, 235, 0.35)");
+        usageGradient.addColorStop(1, "rgba(37, 99, 235, 0.0)");
+
+        const currentColors = getChartColors();
+
+        const usageChart = new Chart(usageCtx, {
+            type: "line",
+            data: {
+                labels: dates,
+                datasets: [{
+                    label: "Electricity Usage (kWh)",
+                    data: units,
+                    borderColor: "#2563eb",
+                    borderWidth: 2.5,
+                    backgroundColor: usageGradient,
+                    tension: 0.35,
+                    fill: true,
+                    pointBackgroundColor: "#2563eb",
+                    pointBorderColor: "#ffffff",
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: currentColors.tooltipBg,
+                        titleColor: currentColors.tooltipText,
+                        bodyColor: currentColors.tooltipText,
+                        padding: 10,
+                        cornerRadius: 8,
+                        callbacks: {
+                            label: (context) => ` Usage: ${context.parsed.y} kWh`
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { color: currentColors.grid },
+                        ticks: { color: currentColors.text, font: { size: 12 } }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: currentColors.grid },
+                        ticks: {
+                            color: currentColors.text,
+                            font: { size: 12 },
+                            callback: (val) => `${val} kWh`
+                        }
+                    }
+                }
+            }
+        });
+
+        // Setup Prediction Bar Chart
+        const predCtx = document.getElementById("predictionChart").getContext("2d");
+        const predGradient = predCtx.createLinearGradient(0, 0, 0, 300);
+        predGradient.addColorStop(0, "#06b6d4");
+        predGradient.addColorStop(1, "#0284c7");
+
+        const predictionChart = new Chart(predCtx, {
+            type: "bar",
+            data: {
+                labels: futureDates,
+                datasets: [{
+                    label: "Predicted (kWh)",
+                    data: predictions,
+                    backgroundColor: predGradient,
+                    borderRadius: 6,
+                    borderSkipped: false
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: currentColors.tooltipBg,
+                        titleColor: currentColors.tooltipText,
+                        bodyColor: currentColors.tooltipText,
+                        padding: 10,
+                        cornerRadius: 8,
+                        callbacks: {
+                            label: (context) => ` Predicted: ${context.parsed.y} kWh`
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: currentColors.text, font: { size: 12 } }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: currentColors.grid },
+                        ticks: {
+                            color: currentColors.text,
+                            font: { size: 12 },
+                            callback: (val) => `${val} kWh`
+                        }
+                    }
+                }
+            }
+        });
+
+        // Handle Theme Toggle
+        themeToggleBtn.addEventListener("click", () => {
+            const currentTheme = htmlElement.getAttribute("data-theme");
+            const newTheme = currentTheme === "dark" ? "light" : "dark";
+
+            htmlElement.setAttribute("data-theme", newTheme);
+            localStorage.setItem("app-theme", newTheme);
+            updateThemeIcon(newTheme);
+
+            // Re-sync chart scales and grid colors
+            const updatedColors = getChartColors();
+            [usageChart, predictionChart].forEach(chart => {
+                chart.options.scales.x.grid.color = chart.options.scales.x.grid.display !== false ? updatedColors.grid : "transparent";
+                chart.options.scales.x.ticks.color = updatedColors.text;
+                chart.options.scales.y.grid.color = updatedColors.grid;
+                chart.options.scales.y.ticks.color = updatedColors.text;
+                chart.options.plugins.tooltip.backgroundColor = updatedColors.tooltipBg;
+                chart.update();
+            });
+        });
+
+        // Auto-fill today's date in form if empty
+        const dateInput = document.getElementById("inputDate");
+        if (dateInput && !dateInput.value) {
+            dateInput.value = new Date().toISOString().split("T")[0];
+        }
+    </script>
+
+</body>
+
+</html>
